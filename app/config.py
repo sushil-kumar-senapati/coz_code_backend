@@ -20,9 +20,22 @@ class Settings(BaseSettings):
     # File uploads
     UPLOAD_DIR: str = "./uploads"
 
+    # MPLADS
+    DEFAULT_MPLADS_BUDGET: int = 50000000  # ₹5 Crore per MP per year
+
     # Server
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
+
+
+def get_current_financial_year() -> str:
+    """Returns Indian financial year string based on current date (April-March)."""
+    from datetime import date
+    today = date.today()
+    if today.month >= 4:
+        return f"{today.year}-{str(today.year + 1)[2:]}"
+    else:
+        return f"{today.year - 1}-{str(today.year)[2:]}"
 
 
 @lru_cache()

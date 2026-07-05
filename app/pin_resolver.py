@@ -14,18 +14,32 @@ import json
 
 log = logging.getLogger("pin_resolver")
 
-# District → Lok Sabha constituency mapping (major ones for demo)
-# In production, load full mapping from Election Commission dataset
+# District → Lok Sabha constituency mapping
+# Source: Election Commission of India delimitation data
+# For Odisha: ALL 30 districts mapped to their respective 21 Lok Sabha constituencies
 DISTRICT_CONSTITUENCY_MAP = {
-    # Odisha
+    # ═══ ODISHA — ALL 30 DISTRICTS → 21 LOK SABHA CONSTITUENCIES ═══
     "Khordha": "Bhubaneswar", "Cuttack": "Cuttack", "Puri": "Puri",
-    "Ganjam": "Berhampur", "Balasore": "Balasore", "Sambalpur": "Sambalpur",
-    "Mayurbhanj": "Mayurbhanj", "Kalahandi": "Kalahandi", "Koraput": "Koraput",
-    "Sundargarh": "Sundargarh", "Kendujhar": "Keonjhar", "Jajpur": "Jajpur",
-    "Bargarh": "Bargarh", "Bolangir": "Bolangir", "Dhenkanal": "Dhenkanal",
-    "Bhadrak": "Bhadrak", "Nabarangpur": "Nabarangpur", "Aska": "Aska",
-    "Kandhamal": "Kandhamal", "Jagatsinghpur": "Jagatsinghpur",
-    "Nayagarh": "Aska",
+    "Ganjam": "Berhampur", "Balasore": "Balasore", "Baleshwar": "Balasore",
+    "Sambalpur": "Sambalpur", "Mayurbhanj": "Mayurbhanj",
+    "Kalahandi": "Kalahandi", "Koraput": "Koraput",
+    "Sundargarh": "Sundargarh", "Sundergarh": "Sundargarh",
+    "Kendujhar": "Keonjhar", "Keonjhar": "Keonjhar",
+    "Jajpur": "Jajpur", "Bargarh": "Bargarh",
+    "Bolangir": "Bolangir", "Balangir": "Bolangir",
+    "Dhenkanal": "Dhenkanal", "Bhadrak": "Bhadrak",
+    "Nabarangpur": "Nabarangpur", "Nabrangpur": "Nabarangpur",
+    "Kandhamal": "Kandhamal", "Phulbani": "Kandhamal",
+    "Jagatsinghpur": "Jagatsinghpur", "Kendrapara": "Kendrapara",
+    "Nayagarh": "Puri", "Angul": "Dhenkanal",
+    "Jharsuguda": "Sambalpur", "Deogarh": "Sambalpur",
+    "Nuapada": "Kalahandi", "Sonepur": "Bolangir", "Subarnapur": "Bolangir",
+    "Boudh": "Kandhamal", "Malkangiri": "Koraput",
+    "Rayagada": "Koraput", "Gajapati": "Aska",
+    "Jagatsinghapur": "Jagatsinghpur",  # Alternate spelling
+    "Nimapara": "Jagatsinghpur",  # Nimapara block → Jagatsinghpur constituency
+    "Nimapada": "Jagatsinghpur",  # Alternate spelling
+
     # Major cities / metros
     "New Delhi": "New Delhi", "North Delhi": "North Delhi", "South Delhi": "South Delhi",
     "East Delhi": "East Delhi", "West Delhi": "West Delhi", "North West Delhi": "North West Delhi",

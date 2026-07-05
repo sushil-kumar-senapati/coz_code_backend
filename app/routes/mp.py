@@ -12,7 +12,13 @@ class DecisionRequest(BaseModel):
     decision: str = Field(..., pattern="^(approved|rejected)$")
     reason: str = Field(..., min_length=10)
     allocated_amount: float | None = None
-    financial_year: str = Field(default="2026-27")
+    financial_year: str | None = None
+
+    def get_financial_year(self) -> str:
+        if self.financial_year:
+            return self.financial_year
+        from app.config import get_current_financial_year
+        return get_current_financial_year()
 
 
 # ── MP Dashboard KPIs ────────────────────────────────────────────────────────
@@ -28,8 +34,24 @@ def mp_dashboard(user=Depends(require_role("mp")), conn=Depends(get_db)):
             SUM(status IN ('scored','enriched','categorized')) AS pending_review,
             SUM(status = 'under_review') AS under_review,
             SUM(status = 'closed' AND id IN (SELECT cluster_id FROM mp_decisions WHERE decision='approved')) AS approved,
-            SUM(status = 'closed' AND id IN (SELECT cluster_id FROM mp_decisions WHERE decision='rejected')) AS rejected
+            SUM(status = 'closed' AND id IN (SELECT cluster_id FROM mp_decisions WHERE decision='rejected')) AS rejected,
+            SUM(unique_users) AS total_citizens,
+            COUNT(DISTINCT district) AS districts_covered,
+            ROUND(AVG(priority_score), 1) AS avg_score
         FROM demand_clusters WHERE constituency = %s
+    """, (constituency,))
+
+    # Total unique citizens who submitted
+    citizen_count = fetch_one(conn, """
+        SELECT COUNT(DISTINCT user_id) AS count FROM raw_submissions WHERE sub_constituency = %s
+    """, (constituency,))
+
+    # Total submissions
+    submission_stats = fetch_one(conn, """
+        SELECT COUNT(*) AS total, SUM(input_type = 'text') AS text_count,
+               SUM(input_type = 'audio') AS audio_count, SUM(input_type = 'image') AS image_count,
+               SUM(input_type IN ('text_audio','text_image','audio_image','text_audio_image')) AS multi_count
+        FROM raw_submissions WHERE sub_constituency = %s
     """, (constituency,))
 
     # Budget
@@ -39,12 +61,75 @@ def mp_dashboard(user=Depends(require_role("mp")), conn=Depends(get_db)):
         ORDER BY financial_year DESC LIMIT 1
     """, (constituency,))
 
-    # Category distribution
+    # Category distribution with approval rate & avg score
     category_stats = fetch_all(conn, """
-        SELECT mplads_category_code AS category, COUNT(*) AS count, SUM(unique_users) AS people
+        SELECT mplads_category_code AS category, COUNT(*) AS count,
+               SUM(unique_users) AS people,
+               ROUND(AVG(priority_score), 1) AS avg_score,
+               SUM(status = 'closed' AND id IN (SELECT cluster_id FROM mp_decisions WHERE decision='approved')) AS approved_count,
+               SUM(status = 'closed' AND id IN (SELECT cluster_id FROM mp_decisions WHERE decision='rejected')) AS rejected_count,
+               SUM(CASE WHEN estimated_cost IS NOT NULL THEN estimated_cost ELSE 0 END) AS total_estimated_cost
         FROM demand_clusters
         WHERE constituency = %s AND mplads_category_code IS NOT NULL
         GROUP BY mplads_category_code ORDER BY people DESC
+    """, (constituency,))
+
+    # Top localities / PIN codes with most issues
+    locality_stats = fetch_all(conn, """
+        SELECT rs.sub_city AS locality, rs.submission_pin_code AS pin_code,
+               rs.sub_district AS district,
+               COUNT(*) AS issue_count, COUNT(DISTINCT rs.user_id) AS people
+        FROM raw_submissions rs
+        WHERE rs.sub_constituency = %s
+        GROUP BY rs.sub_city, rs.submission_pin_code, rs.sub_district
+        ORDER BY issue_count DESC LIMIT 15
+    """, (constituency,))
+
+    # Top active citizens (most submissions)
+    top_submitters = fetch_all(conn, """
+        SELECT u.name, u.phone, u.home_city, u.total_submissions,
+               COUNT(rs.id) AS constituency_submissions
+        FROM users u
+        JOIN raw_submissions rs ON rs.user_id = u.id
+        WHERE rs.sub_constituency = %s AND u.role = 'user'
+        GROUP BY u.id, u.name, u.phone, u.home_city, u.total_submissions
+        ORDER BY constituency_submissions DESC LIMIT 10
+    """, (constituency,))
+
+    # Submission trend (last 30 days)
+    submission_trend = fetch_all(conn, """
+        SELECT DATE(created_at) AS date, COUNT(*) AS count
+        FROM raw_submissions
+        WHERE sub_constituency = %s AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        GROUP BY DATE(created_at) ORDER BY date
+    """, (constituency,))
+
+    # Score distribution (how many clusters in each score range)
+    score_distribution = fetch_all(conn, """
+        SELECT
+            CASE
+                WHEN priority_score >= 8 THEN '8-10 (Critical)'
+                WHEN priority_score >= 6 THEN '6-8 (High)'
+                WHEN priority_score >= 4 THEN '4-6 (Medium)'
+                WHEN priority_score >= 2 THEN '2-4 (Low)'
+                ELSE '0-2 (Minimal)'
+            END AS score_range,
+            COUNT(*) AS count
+        FROM demand_clusters
+        WHERE constituency = %s AND priority_score IS NOT NULL
+        GROUP BY score_range
+        ORDER BY MIN(priority_score) DESC
+    """, (constituency,))
+
+    # Budget utilization by category (approved amounts)
+    budget_by_category = fetch_all(conn, """
+        SELECT dc.mplads_category_code AS category,
+               SUM(md.allocated_amount) AS allocated,
+               COUNT(md.id) AS works_count
+        FROM mp_decisions md
+        JOIN demand_clusters dc ON md.cluster_id = dc.id
+        WHERE md.constituency = %s AND md.decision = 'approved'
+        GROUP BY dc.mplads_category_code ORDER BY allocated DESC
     """, (constituency,))
 
     # Financial year trends
@@ -59,12 +144,45 @@ def mp_dashboard(user=Depends(require_role("mp")), conn=Depends(get_db)):
         GROUP BY financial_year ORDER BY financial_year
     """, (constituency,))
 
+    # SC/ST compliance (22.5% mandate)
+    sc_st_data = fetch_one(conn, """
+        SELECT
+            SUM(CASE WHEN ds.data_json IS NOT NULL THEN 1 ELSE 0 END) AS data_available,
+            COUNT(*) AS total_clusters
+        FROM demand_clusters dc
+        LEFT JOIN data_sources ds ON ds.source_type = 'census_village' AND ds.district = dc.district
+        WHERE dc.constituency = %s
+    """, (constituency,))
+
+    # Input type distribution
+    input_type_stats = fetch_all(conn, """
+        SELECT input_type, COUNT(*) AS count
+        FROM raw_submissions WHERE sub_constituency = %s
+        GROUP BY input_type ORDER BY count DESC
+    """, (constituency,))
+
+    # Unique PIN codes
+    pin_count = fetch_one(conn, """
+        SELECT COUNT(DISTINCT submission_pin_code) AS count
+        FROM raw_submissions WHERE sub_constituency = %s
+    """, (constituency,))
+
     return {
         "constituency": constituency,
+        "mp_name": user.get("name", ""),
         "cluster_kpis": cluster_kpis,
+        "citizen_count": citizen_count.get("count", 0) if citizen_count else 0,
+        "submission_stats": submission_stats,
         "budget": budget,
         "category_stats": category_stats,
+        "locality_stats": locality_stats,
+        "top_submitters": top_submitters,
+        "submission_trend": submission_trend,
+        "score_distribution": score_distribution,
+        "budget_by_category": budget_by_category,
         "yearly_trends": yearly_trends,
+        "input_type_stats": input_type_stats,
+        "pin_count": pin_count.get("count", 0) if pin_count else 0,
     }
 
 
@@ -160,11 +278,12 @@ def decide_cluster(
     constituency = user.get("home_constituency", "")
 
     # Insert decision
+    fy = req.get_financial_year()
     execute_returning_id(
         conn,
         """INSERT INTO mp_decisions (id, cluster_id, mp_user_id, decision, reason, allocated_amount, financial_year, constituency)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-        (cluster_id, user["id"], req.decision, req.reason, req.allocated_amount, req.financial_year, constituency),
+        (cluster_id, user["id"], req.decision, req.reason, req.allocated_amount, fy, constituency),
     )
 
     # Update cluster status
@@ -180,14 +299,14 @@ def decide_cluster(
                 approved_count = approved_count + 1,
                 pending_count = GREATEST(pending_count - 1, 0)
             WHERE constituency = %s AND financial_year = %s
-        """, (req.allocated_amount, req.allocated_amount, constituency, req.financial_year))
+        """, (req.allocated_amount, req.allocated_amount, constituency, fy))
     elif req.decision == "rejected":
         execute(conn, """
             UPDATE budget_tracker
             SET rejected_count = rejected_count + 1,
                 pending_count = GREATEST(pending_count - 1, 0)
             WHERE constituency = %s AND financial_year = %s
-        """, (constituency, req.financial_year))
+        """, (constituency, fy))
 
     # Update all submissions in this cluster
     execute(conn, """

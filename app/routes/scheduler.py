@@ -9,7 +9,7 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler (Manual Trigger)"])
 
 log = logging.getLogger("scheduler_trigger")
 
-SCHEDULER_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "backend-scheduler"))
+SCHEDULER_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "coz_code_scheduler"))
 
 
 @router.post("/run")

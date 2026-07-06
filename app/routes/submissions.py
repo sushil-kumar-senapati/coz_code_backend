@@ -15,6 +15,7 @@ router = APIRouter(prefix="/submissions", tags=["Submissions (Layer 1)"])
 async def submit_issue(
     submission_pin_code: str = Form(...),
     input_type: str = Form(...),
+    sub_constituency: str = Form(None),
     raw_text: str = Form(None),
     raw_language: str = Form("en"),
     audio_file: UploadFile = File(None),
@@ -28,6 +29,9 @@ async def submit_issue(
     pin_data = resolve_pin(conn, submission_pin_code)
     if not pin_data:
         raise HTTPException(status_code=400, detail="Invalid PIN code — not found in India Post directory")
+
+    # Constituency comes from user's explicit selection, fallback to PIN-derived
+    constituency = sub_constituency or pin_data.get("mp_constituency", "")
 
     # Generate tracking ID
     cursor = conn.cursor(dictionary=True)
@@ -48,7 +52,7 @@ async def submit_issue(
         (
             tracking_id, user["id"], submission_pin_code,
             pin_data["postal_name"], pin_data["locality"], pin_data["city"],
-            pin_data["district"], pin_data["state"], pin_data["mp_constituency"],
+            pin_data["district"], pin_data["state"], constituency,
             input_type, raw_text, raw_language,
         ),
     )

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # MPLADS
     DEFAULT_MPLADS_BUDGET: int = 50000000  # ₹5 Crore per MP per year
 
+    # CORS — space-separated list of allowed origins
+    # e.g. "https://frontend-xyz-uc.a.run.app http://localhost:5173"
+    CORS_ORIGINS: str = "http://localhost:5173 http://localhost:3000"
+
     # Server
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000

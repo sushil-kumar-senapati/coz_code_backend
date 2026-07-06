@@ -14,10 +14,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS for React frontend
+# CORS — origins loaded from CORS_ORIGINS env var (space-separated)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.CORS_ORIGINS.split(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

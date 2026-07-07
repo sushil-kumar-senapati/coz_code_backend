@@ -15,9 +15,11 @@ app = FastAPI(
 )
 
 # CORS — origins loaded from CORS_ORIGINS env var (space-separated)
+# allow_origin_regex also permits any Cloud Run URL as a safety net
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS.split(),
+    allow_origin_regex=r"https://.*\.run\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

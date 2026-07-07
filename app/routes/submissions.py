@@ -5,6 +5,7 @@ from app.database import get_db, fetch_one, fetch_all, execute_returning_id, exe
 from app.auth import get_current_user
 from app.config import get_settings
 from app.pin_resolver import resolve_pin
+from app.storage import upload_file
 
 router = APIRouter(prefix="/submissions", tags=["Submissions (Layer 1)"])
 
@@ -57,21 +58,14 @@ async def submit_issue(
         ),
     )
 
-    # Save files locally (hackathon — production would use S3)
-    settings = get_settings()
-    upload_dir = os.path.join(settings.UPLOAD_DIR, sub_id)
-    os.makedirs(upload_dir, exist_ok=True)
-
     async def save_media(file: UploadFile, media_type: str):
         if not file:
             return
         ext = os.path.splitext(file.filename)[1] if file.filename else ""
         file_name = f"{media_type}_{uuid.uuid4().hex[:8]}{ext}"
-        file_path = os.path.join(upload_dir, file_name)
+        blob_name = f"submissions/{sub_id}/{file_name}"
         content = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-        file_url = f"/uploads/{sub_id}/{file_name}"
+        file_url = upload_file(content, blob_name, file.content_type or "application/octet-stream")
         execute_returning_id(
             conn,
             """INSERT INTO submission_media

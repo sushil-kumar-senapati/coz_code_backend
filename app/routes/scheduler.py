@@ -1,7 +1,6 @@
-import subprocess
-import os
+import urllib.request
+import urllib.error
 import logging
-import json
 from fastapi import APIRouter
 from datetime import datetime
 
@@ -9,81 +8,47 @@ router = APIRouter(prefix="/scheduler", tags=["Scheduler (Manual Trigger)"])
 
 log = logging.getLogger("scheduler_trigger")
 
-SCHEDULER_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "coz_code_scheduler"))
-
 
 @router.post("/run")
 def trigger_pipeline():
     """
     Manually trigger the Layer 2→3→4→5 pipeline.
-    Runs the scheduler as a subprocess so there's no import conflict.
+    Calls the dedicated scheduler Cloud Run service via HTTP.
     """
+    from app.config import get_settings
+    settings = get_settings()
     start = datetime.now()
 
     try:
-        result = subprocess.run(
-            ["python", "-c", """
-import sys, os
-sys.path.insert(0, '.')
-from pipeline.db import get_connection
-from pipeline.layer2_processing import process_submissions
-from pipeline.layer3_clustering import cluster_and_categorize, _categorize_clusters
-from pipeline.layer4_enrichment import enrich_clusters
-from pipeline.layer5_scoring import score_and_rank
-
-conn = get_connection()
-l2 = process_submissions(conn)
-l3 = cluster_and_categorize(conn)
-# Also re-categorize any stuck clusters
-_categorize_clusters(conn)
-l4 = enrich_clusters(conn)
-l5 = score_and_rank(conn)
-print(f"RESULT:{l2},{l3},{l4},{l5}")
-conn.close()
-"""],
-            cwd=SCHEDULER_DIR,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-
+        url = f"{settings.SCHEDULER_SERVICE_URL.rstrip('/')}/run"
+        req = urllib.request.Request(url, data=b"", method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode()
         elapsed = (datetime.now() - start).total_seconds()
-
-        # Parse output for layer counts
-        output = result.stdout + result.stderr
-        layers = {}
-        for line in output.split("\n"):
-            if line.startswith("RESULT:"):
-                parts = line.replace("RESULT:", "").split(",")
-                if len(parts) == 4:
-                    layers = {"layer2_processed": int(parts[0]), "layer3_clustered": int(parts[1]),
-                              "layer4_enriched": int(parts[2]), "layer5_scored": int(parts[3])}
-            elif "Layer 2:" in line:
-                layers.setdefault("layer2_processed", _extract_count(line))
-            elif "Layer 3:" in line and "Clustered" in line:
-                layers.setdefault("layer3_clustered", _extract_count(line))
-            elif "Layer 4:" in line and "Enriched" in line:
-                layers.setdefault("layer4_enriched", _extract_count(line))
-            elif "Layer 5:" in line and "Scored" in line:
-                layers.setdefault("layer5_scored", _extract_count(line))
-
         return {
-            "status": "success" if result.returncode == 0 else "error",
-            "layers": layers,
-            "elapsed_seconds": round(elapsed, 2),
-            "message": f"Pipeline complete in {elapsed:.1f}s",
-            "output": output[-1500:] if output else "",
-            "errors": result.stderr[-500:] if result.stderr else "",
+            "status": "triggered",
+            "message": f"Scheduler service acknowledged in {elapsed:.1f}s. Pipeline is running in the background.",
+            "scheduler_response": body,
         }
-
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "error": "Pipeline timed out (120s limit)"}
+    except urllib.error.URLError as e:
+        elapsed = (datetime.now() - start).total_seconds()
+        return {
+            "status": "error",
+            "error": f"Could not reach scheduler service: {e.reason}",
+            "scheduler_url": settings.SCHEDULER_SERVICE_URL,
+        }
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
-def _extract_count(line: str) -> int:
-    """Extract number from lines like 'Layer 2: Processed 3/3 submissions'."""
-    import re
-    m = re.search(r'(\d+)', line.split(":")[-1])
-    return int(m.group(1)) if m else 0
+@router.get("/status")
+def scheduler_status():
+    """Check if the scheduler service is reachable."""
+    from app.config import get_settings
+    settings = get_settings()
+    try:
+        req = urllib.request.Request(settings.SCHEDULER_SERVICE_URL, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return {"status": "online", "scheduler_url": settings.SCHEDULER_SERVICE_URL, "response": resp.read().decode()}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}

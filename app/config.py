@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Cloud Storage
     GCS_BUCKET: str = "pp26-501410-uploads"
 
+    # Scheduler service URL
+    SCHEDULER_SERVICE_URL: str = "https://scheduler-186301339803.asia-south1.run.app"
+
     # CORS — space-separated list of allowed origins
     # e.g. "https://frontend-xyz-uc.a.run.app http://localhost:5173"
     CORS_ORIGINS: str = "https://frontend-186301339803.asia-south1.run.app https://scheduler-186301339803.asia-south1.run.app http://localhost:5173 http://localhost:3000"
